@@ -60,6 +60,12 @@ func (g *Generator) readKafka(ctx context.Context) error {
 
 	for iter := fetches.RecordIter(); !iter.Done(); {
 		r := iter.Next()
+		for _, header := range r.Headers {
+			if header.Key == ingest.NoGenerateMetrics {
+				g.skippedRecords.Inc()
+				continue
+			}
+		}
 
 		tenant := string(r.Key)
 

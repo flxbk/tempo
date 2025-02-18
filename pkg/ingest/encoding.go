@@ -11,6 +11,10 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
+const (
+	NoGenerateMetrics = "no-generate-metrics"
+)
+
 var encoderPool = sync.Pool{
 	New: func() any {
 		return &tempopb.PushBytesRequest{}
@@ -35,12 +39,12 @@ func encoderPoolPut(req *tempopb.PushBytesRequest) {
 	encoderPool.Put(req)
 }
 
-func Encode(partitionID int32, tenantID string, req *tempopb.PushBytesRequest, maxSize int) ([]*kgo.Record, error) {
+func Encode(partitionID int32, tenantID string, req *tempopb.PushBytesRequest, maxSize int, generateMetrics bool) ([]*kgo.Record, error) {
 	reqSize := req.Size()
 
 	// Fast path for small requests
 	if reqSize <= maxSize {
-		rec, err := marshalWriteRequestToRecord(partitionID, tenantID, req)
+		rec, err := marshalWriteRequestToRecord(partitionID, tenantID, req, generateMetrics)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +70,7 @@ func Encode(partitionID int32, tenantID string, req *tempopb.PushBytesRequest, m
 		if currentSize+entrySize > maxSize {
 			// Current req is full, create a record and start a new req
 			if len(batch.Traces) > 0 {
-				rec, err := marshalWriteRequestToRecord(partitionID, tenantID, batch)
+				rec, err := marshalWriteRequestToRecord(partitionID, tenantID, batch, generateMetrics)
 				if err != nil {
 					return nil, err
 				}
@@ -84,7 +88,7 @@ func Encode(partitionID int32, tenantID string, req *tempopb.PushBytesRequest, m
 
 	// Handle any remaining entries
 	if len(batch.Traces) > 0 {
-		rec, err := marshalWriteRequestToRecord(partitionID, tenantID, batch)
+		rec, err := marshalWriteRequestToRecord(partitionID, tenantID, batch, generateMetrics)
 		if err != nil {
 			return nil, err
 		}
@@ -99,17 +103,23 @@ func Encode(partitionID int32, tenantID string, req *tempopb.PushBytesRequest, m
 }
 
 // marshalWriteRequestToRecord converts a PushBytesRequest to a Kafka record.
-func marshalWriteRequestToRecord(partitionID int32, tenantID string, req *tempopb.PushBytesRequest) (*kgo.Record, error) {
+func marshalWriteRequestToRecord(partitionID int32, tenantID string, req *tempopb.PushBytesRequest, generateMetrics bool) (*kgo.Record, error) {
 	data, err := req.Marshal()
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal record: %w", err)
 	}
 
-	return &kgo.Record{
+	r := &kgo.Record{
 		Key:       []byte(tenantID),
 		Value:     data,
 		Partition: partitionID,
-	}, nil
+	}
+
+	if !generateMetrics {
+		r.Headers = []kgo.RecordHeader{{Key: NoGenerateMetrics}}
+	}
+
+	return r, nil
 }
 
 // Decoder is responsible for decoding Kafka record data back into logproto.Stream format.

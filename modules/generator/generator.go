@@ -17,6 +17,7 @@ import (
 	"github.com/grafana/dskit/services"
 	"github.com/grafana/dskit/user"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel"
@@ -38,6 +39,8 @@ const (
 	// We use a safe default instead of exposing to config option to the user
 	// in order to simplify the config.
 	ringNumTokens = 256
+
+	NoGenerateMetricsContextKey = "no-generate-metrics"
 )
 
 var tracer = otel.Tracer("modules/generator")
@@ -77,6 +80,8 @@ type Generator struct {
 	partitionRing      ring.PartitionRingReader
 	partitionMtx       sync.RWMutex
 	assignedPartitions []int32
+
+	skippedRecords prometheus.Counter
 }
 
 // New makes a new Generator.
@@ -132,6 +137,11 @@ func New(cfg *Config, overrides metricsGeneratorOverrides, reg prometheus.Regist
 	if err != nil {
 		return nil, fmt.Errorf("create ring lifecycler: %w", err)
 	}
+
+	g.skippedRecords = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "tempo_metrics_generator_skipped_records_total",
+		Help: "Thea number of records skipped because it was requested by the producer.",
+	})
 
 	g.Service = services.NewBasicService(g.starting, g.running, g.stopping)
 	return g, nil
@@ -353,7 +363,7 @@ func (g *Generator) createInstance(id string) (*instance, error) {
 		}
 	}
 
-	inst, err := newInstance(g.cfg, id, g.overrides, wal, reg, g.logger, tracesWAL, tracesQueryWAL, g.store)
+	inst, err := newInstance(g.cfg, id, g.overrides, wal, g.logger, tracesWAL, tracesQueryWAL, g.store)
 	if err != nil {
 		_ = wal.Close()
 		return nil, err
