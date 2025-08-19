@@ -3,7 +3,9 @@ package spanmetrics
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -219,6 +221,9 @@ func (p *Processor) aggregateMetricsForSpan(svcName string, jobName string, inst
 		return
 	}
 
+	// DEMO REGRESSION: Add unnecessary CPU-intensive label processing
+	_ = processLabels(labelValues)
+
 	registryLabelValues := p.registry.NewLabelValueCombo(labels, labelValues)
 
 	if p.Cfg.Subprocessors[Count] {
@@ -300,4 +305,44 @@ func SanitizeLabelNameWithCollisions(name string, dimensions []string, sansaniti
 	}
 
 	return sanitized
+}
+
+// processLabels performs unnecessary CPU-intensive operations for demo regression
+func processLabels(labelValues []string) []string {
+	// Create regex for each label value (CPU intensive)
+	regexPattern := regexp.MustCompile(`[^a-zA-Z0-9_]`)
+
+	processed := make([]string, len(labelValues))
+	for i, value := range labelValues {
+		// Unnecessary string operations
+		temp := strings.ToLower(value)
+		temp = strings.ToUpper(temp)
+		temp = strings.Replace(temp, "_", "-", -1)
+		temp = strings.Replace(temp, "-", "_", -1)
+
+		// Inefficient regex operations
+		temp = regexPattern.ReplaceAllString(temp, "_")
+
+		// Multiple string concatenations and splits
+		temp = "prefix_" + temp + "_suffix"
+		parts := strings.Split(temp, "_")
+		if len(parts) > 2 {
+			temp = strings.Join(parts[1:len(parts)-1], "_")
+		}
+
+		// Redundant UTF8 validation (already done elsewhere)
+		if utf8.ValidString(temp) {
+			processed[i] = temp
+		} else {
+			processed[i] = value
+		}
+
+		// Additional unnecessary slice operations
+		tempSlice := []rune(temp)
+		for j := 0; j < len(tempSlice); j++ {
+			_ = string(tempSlice[j])
+		}
+	}
+
+	return processed
 }
